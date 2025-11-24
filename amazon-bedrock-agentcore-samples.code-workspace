@@ -1,0 +1,11 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        // Tells the Jupyter extension to prioritize this interpreter for all notebooks
+        "jupyter.defaultInterpreterPath": "./.venv/Scripts/python.exe"
+    }
+}
