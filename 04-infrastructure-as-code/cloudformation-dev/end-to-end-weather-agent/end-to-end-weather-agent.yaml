@@ -584,17 +584,23 @@ Resources:
                 - |
                   cat > my_agent.py << 'EOF'
                   from strands import Agent, tool
+                  from strands.hooks import AgentInitializedEvent, HookProvider, HookRegistry, MessageAddedEvent
                   from strands_tools import use_aws
                   from typing import Dict, Any
                   import json
                   import os
                   import asyncio
                   from contextlib import suppress
+                  import logging
 
                   import shutil
                   import sys
                   from pathlib import Path
                   import asyncio, os
+
+                  # Setup logging
+                  logging.basicConfig(level=logging.INFO)
+                  logger = logging.getLogger("weather-agent")
 
 
                   def find_browser_use_path():
@@ -676,6 +682,61 @@ Resources:
                   from rich.console import Console
                   import re
 
+                  # Memory Hook Provider Class
+                  class MemoryHookProvider(HookProvider):
+                      def __init__(self, memory_client: MemoryClient, memory_id: str, actor_id: str, session_id: str):
+                          self.memory_client = memory_client
+                          self.memory_id = memory_id
+                          self.actor_id = actor_id
+                          self.session_id = session_id
+                      
+                      def on_agent_initialized(self, event: AgentInitializedEvent):
+                          """Load recent conversation history when agent starts"""
+                          try:
+                              # Load the last 5 conversation turns from memory
+                              recent_turns = self.memory_client.get_last_k_turns(
+                                  memory_id=self.memory_id,
+                                  actor_id=self.actor_id,
+                                  session_id=self.session_id,
+                                  k=5
+                              )
+                              
+                              if recent_turns:
+                                  # Format conversation history for context
+                                  context_messages = []
+                                  for turn in recent_turns:
+                                      for message in turn:
+                                          role = message['role']
+                                          content = message['content']['text']
+                                          context_messages.append(f"{role}: {content}")
+                                  
+                                  context = "\n".join(context_messages)
+                                  # Add context to agent's system prompt
+                                  event.agent.system_prompt += f"\n\nRecent conversation:\n{context}"
+                                  logger.info(f"✅ Loaded {len(recent_turns)} conversation turns")
+                                  
+                          except Exception as e:
+                              logger.error(f"Memory load error: {e}")
+                      
+                      def on_message_added(self, event: MessageAddedEvent):
+                          """Store messages in memory"""
+                          messages = event.agent.messages
+                          try:
+                              if messages[-1]["content"][0].get("text"):
+                                  self.memory_client.create_event(
+                                      memory_id=self.memory_id,
+                                      actor_id=self.actor_id,
+                                      session_id=self.session_id,
+                                      messages=[(messages[-1]["content"][0]["text"], messages[-1]["role"])]
+                                  )
+                          except Exception as e:
+                              logger.error(f"Memory save error: {e}")
+                      
+                      def register_hooks(self, registry: HookRegistry):
+                          # Register memory hooks
+                          registry.add_callback(MessageAddedEvent, self.on_message_added)
+                          registry.add_callback(AgentInitializedEvent, self.on_agent_initialized)
+
                   from bedrock_agentcore.runtime import BedrockAgentCoreApp
                   app = BedrockAgentCoreApp()
 
@@ -687,6 +748,10 @@ Resources:
                   MEMORY_ID = os.getenv('MEMORY_ID', "")
                   RESULTS_BUCKET = os.getenv('RESULTS_BUCKET', "default-results-bucket")
                   region = os.getenv('AWS_REGION','us-west-2')
+                  
+                  # Memory configuration
+                  ACTOR_ID = "weather_user_123"
+                  SESSION_ID = "weather_session_001"
 
                   # Async helper functions
                   async def run_browser_task(browser_session, bedrock_chat, task: str) -> str:
@@ -901,8 +966,8 @@ Resources:
                           return {"status": "error", "content": [{"text": f"Error: {str(e)}"}]}
 
                   def create_weather_agent() -> Agent:
-                      """Create the weather agent with all tools"""
-                      system_prompt = f"""You are a Weather-Based Activity Planning Assistant.
+                      """Create the weather agent with all tools and memory hooks"""
+                      system_prompt = f"""You are a Weather-Based Activity Planning Assistant with memory capabilities.
 
                       When a user asks about activities for a location, follow below stepes Sequentially:
                       1. Extract city from user query
@@ -913,12 +978,18 @@ Resources:
                       6. Generate Activity Recommendations based on weather and preferences that you have recieved from previous steps
                       7. Generate the comprehensive Markdown file (results.md) and store it in S3 Bucket :  {RESULTS_BUCKET} through use_aws tool. 
                       
+                      You can remember previous conversations and user preferences from past interactions.
                       IMPORTANT: Provide complete recommendations and end your response. Do NOT ask follow-up questions or wait for additional input."""
+                      
+                      # Initialize memory client and hook provider
+                      memory_client = MemoryClient(region_name=region)
+                      memory_hook = MemoryHookProvider(memory_client, MEMORY_ID, ACTOR_ID, SESSION_ID)
                       
                       return Agent(
                           tools=[get_weather_data, generate_analysis_code, execute_code, get_activity_preferences, use_aws],
                           system_prompt=system_prompt,
-                          name="WeatherActivityPlanner"
+                          name="WeatherActivityPlanner",
+                          hooks=[memory_hook]
                       )
 
                   @app.async_task
@@ -954,9 +1025,10 @@ Resources:
                   @app.entrypoint
                   async def invoke(payload=None):
                       try:
-                          # change
+                          # Extract query from payload
                           query = payload.get("prompt")
 
+                          # Start async task
                           asyncio.create_task(async_main(query))
                           
                           msg = (
