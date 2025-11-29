@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "MCP Server on AgentCore Runtime - Deploy an MCP server with custom tools (add_numbers, multiply_numbers, greet_user)"
+Description: "MCP Server on AgentCore Runtime - Deploy an MCP server with custom tools (add_numbers, multiply_numbers, greet_user) AND MEMORY"
 
 # ============================================================================
 # PARAMETERS SECTION
@@ -48,6 +48,21 @@ Parameters:
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,47}$"
     ConstraintDescription: "Must start with a letter, max 48 characters, alphanumeric and underscores only"
 
+  EnableAdvancedMemory:
+    Type: String
+    Default: "false"
+    Description: "Enable advanced long-term memory with user preference extraction strategies"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  MemoryEventExpiryDays:
+    Type: Number
+    Default: 30
+    Description: "Number of days before memory events expire (1-365)"
+    MinValue: 1
+    MaxValue: 365
+
 # ============================================================================
 # METADATA SECTION
 # ============================================================================
@@ -72,6 +87,8 @@ Metadata:
           default: "Memory Configuration"
         Parameters:
           - MemoryName
+          - EnableAdvancedMemory
+          - MemoryEventExpiryDays
     ParameterLabels:
       AgentName:
         default: "Agent Name"
@@ -85,6 +102,18 @@ Metadata:
         default: "LLM Model ID"
       MemoryName:
         default: "Memory Name"
+      EnableAdvancedMemory:
+        default: "Enable Advanced Memory"
+      MemoryEventExpiryDays:
+        default: "Memory Event Expiry Days"
+
+# ============================================================================
+# CONDITIONS SECTION
+# ============================================================================
+Conditions:
+  UseAdvancedMemory: !Equals [!Ref EnableAdvancedMemory, "true"]
+  UseBasicMemory: !Equals [!Ref EnableAdvancedMemory, "false"]
+  CreateMemoryInCloudFormation: !Equals [!Ref EnableAdvancedMemory, "false"]
 
 # ============================================================================
 # RESOURCES SECTION
@@ -545,43 +574,80 @@ Resources:
                   
                   memory_id = event['ResourceProperties']['MemoryId']
                   region = event['ResourceProperties'].get('Region', 'us-west-2')
+                  advanced_memory = event['ResourceProperties'].get('AdvancedMemoryEnabled', 'false').lower() == 'true'
                   timestamp = datetime.utcnow().isoformat() + 'Z'
 
                   logger.info(f"Initializing memory entries for Memory ID: {memory_id}")
-
-                  # Sample memory data for MCP server
-                  mcp_context = {
-                      "server_info": "MCP Server with custom tools",
-                      "available_tools": ["add_numbers", "multiply_numbers", "greet_user"],
-                      "tool_descriptions": {
-                          "add_numbers": "Adds two numbers together",
-                          "multiply_numbers": "Multiplies two numbers together",
-                          "greet_user": "Greets a user by name"
-                      }
-                  }
-
-                  # Convert the dictionary to a JSON string for storage in the blob
-                  mcp_context_json = json.dumps(mcp_context)
+                  logger.info(f"Advanced memory enabled: {advanced_memory}")
 
                   # Initialize the bedrock-agentcore client
                   client = boto3.client('bedrock-agentcore', region_name=region)
-                  
-                  response = client.create_event(
-                      memoryId=memory_id,
-                      actorId="mcp_server",
-                      sessionId="init_session",
-                      eventTimestamp=timestamp,
-                      payload=[
-                          {
-                              'blob': mcp_context_json,
+
+                  if advanced_memory:
+                      # Initialize with sample conversation for advanced memory
+                      sample_conversation = {
+                          "conversation_type": "advanced_memory_test",
+                          "messages": [
+                              {"role": "USER", "content": "Hi, I'm a user testing the MCP server"},
+                              {"role": "ASSISTANT", "content": "Hello! I'm your MCP server assistant. I can help you with mathematical operations and greetings. What would you like to do?"},
+                              {"role": "USER", "content": "I prefer simple calculations and friendly interactions"},
+                              {"role": "ASSISTANT", "content": "Perfect! I'll remember that you like simple calculations and friendly interactions. I have tools for adding numbers, multiplying numbers, and greeting users."},
+                              {"role": "USER", "content": "That sounds great! I really enjoy working with numbers"},
+                              {"role": "ASSISTANT", "content": "Excellent! I can see you enjoy mathematical operations. Feel free to ask me to add or multiply numbers anytime."}
+                          ],
+                          "user_preferences": {
+                              "likes": ["mathematical operations", "friendly interactions", "working with numbers"],
+                              "interaction_style": "simple and direct"
                           }
-                      ]
-                  )
-                  logger.info(f"Successfully created memory event: {response}")
+                      }
+                      
+                      # Convert to JSON string for storage
+                      conversation_json = json.dumps(sample_conversation)
+                      
+                      response = client.create_event(
+                          memoryId=memory_id,
+                          actorId="test_user",
+                          sessionId="init_session",
+                          eventTimestamp=timestamp,
+                          payload=[
+                              {
+                                  'blob': conversation_json,
+                              }
+                          ]
+                      )
+                      logger.info(f"Successfully created advanced memory event with sample conversation: {response}")
+                  else:
+                      # Basic memory initialization
+                      mcp_context = {
+                          "server_info": "MCP Server with custom tools",
+                          "available_tools": ["add_numbers", "multiply_numbers", "greet_user"],
+                          "tool_descriptions": {
+                              "add_numbers": "Adds two numbers together",
+                              "multiply_numbers": "Multiplies two numbers together",
+                              "greet_user": "Greets a user by name"
+                          }
+                      }
+
+                      # Convert the dictionary to a JSON string for storage in the blob
+                      mcp_context_json = json.dumps(mcp_context)
+                      
+                      response = client.create_event(
+                          memoryId=memory_id,
+                          actorId="mcp_server",
+                          sessionId="init_session",
+                          eventTimestamp=timestamp,
+                          payload=[
+                              {
+                                  'blob': mcp_context_json,
+                              }
+                          ]
+                      )
+                      logger.info(f"Successfully created basic memory event: {response}")
                   
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {
                       'MemoryId': memory_id,
-                      'Status': 'INITIALIZED'
+                      'Status': 'INITIALIZED',
+                      'MemoryType': 'ADVANCED' if advanced_memory else 'BASIC'
                   })
                   
               except Exception as e:
@@ -733,17 +799,33 @@ Resources:
       WaitForCompletion: "true"
 
   # ========================================================================
-  # AGENTCORE MODULE - Memory
+  # AGENTCORE MODULE - Memory (Basic)
   # ========================================================================
 
-  MCPServerMemory:
+  MCPServerMemoryBasic:
     Type: AWS::BedrockAgentCore::Memory
+    Condition: CreateMemoryInCloudFormation
     Properties:
       Name: !Sub
         - "${StackNameUnderscore}_${MemoryName}"
         - StackNameUnderscore: !Join ["_", !Split ["-", !Ref "AWS::StackName"]]
-      Description: !Sub "Memory for ${AWS::StackName} MCP server"
-      EventExpiryDuration: 30
+      Description: !Sub "Basic memory for ${AWS::StackName} MCP server"
+      EventExpiryDuration: !Ref MemoryEventExpiryDays
+
+  # ========================================================================
+  # AGENTCORE MODULE - Memory (Advanced with Strategies)
+  # Note: Advanced memory is created via Python SDK post-deployment
+  # ========================================================================
+
+  # SSM Parameter to store advanced memory ID (created by Python SDK)
+  AdvancedMemoryIdParameter:
+    Type: AWS::SSM::Parameter
+    Condition: UseAdvancedMemory
+    Properties:
+      Name: !Sub "/bedrock-agentcore/${AWS::StackName}/advanced-memory-id"
+      Type: String
+      Value: "PLACEHOLDER_WILL_BE_UPDATED_BY_SDK"
+      Description: !Sub "Advanced memory ID for ${AWS::StackName} MCP server (updated by Python SDK)"
 
   # ========================================================================
   # CUSTOM RESOURCE - Initialize Memory with Default Entries
@@ -751,13 +833,12 @@ Resources:
 
   InitializeMemoryEntries:
     Type: Custom::MemoryInitializer
-    DependsOn:
-      - MCPServerMemory
-      - MemoryInitializerFunction
+    Condition: CreateMemoryInCloudFormation
     Properties:
       ServiceToken: !GetAtt MemoryInitializerFunction.Arn
-      MemoryId: !GetAtt MCPServerMemory.MemoryId
+      MemoryId: !GetAtt MCPServerMemoryBasic.MemoryId
       Region: !Ref AWS::Region
+      AdvancedMemoryEnabled: !Ref EnableAdvancedMemory
 
   # ========================================================================
   # AGENTCORE MODULE - MCP Server Runtime
@@ -765,9 +846,9 @@ Resources:
 
   MCPServerRuntime:
     Type: AWS::BedrockAgentCore::Runtime
+    Condition: CreateMemoryInCloudFormation
     DependsOn:
       - TriggerImageBuild
-      - MCPServerMemory
     Properties:
       AgentRuntimeName: !Sub
         - "${StackNameUnderscore}_${AgentName}"
@@ -786,27 +867,31 @@ Resources:
           DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}/.well-known/openid-configuration"
       Description: !Sub "MCP server runtime for ${AWS::StackName}"
       EnvironmentVariables:
-        MEMORY_ID: !GetAtt MCPServerMemory.MemoryId
+        MEMORY_ID: !GetAtt MCPServerMemoryBasic.MemoryId
         AWS_REGION: !Sub "${AWS::Region}"
+        ADVANCED_MEMORY_ENABLED: !Ref EnableAdvancedMemory
 
 # ============================================================================
 # OUTPUTS SECTION
 # ============================================================================
 Outputs:
-  # AGENTCORE MODULE OUTPUTS
+  # AGENTCORE MODULE OUTPUTS (only for basic memory)
   MCPServerRuntimeId:
+    Condition: CreateMemoryInCloudFormation
     Description: "ID of the created MCP server runtime"
     Value: !GetAtt MCPServerRuntime.AgentRuntimeId
     Export:
       Name: !Sub "${AWS::StackName}-MCPServerRuntimeId"
 
   MCPServerRuntimeArn:
+    Condition: CreateMemoryInCloudFormation
     Description: "ARN of the created MCP server runtime"
     Value: !GetAtt MCPServerRuntime.AgentRuntimeArn
     Export:
       Name: !Sub "${AWS::StackName}-MCPServerRuntimeArn"
 
   MCPServerInvocationURL:
+    Condition: CreateMemoryInCloudFormation
     Description: "URL to invoke the MCP server"
     Value: !Sub
       - "https://bedrock-agentcore.${AWS::Region}.amazonaws.com/runtimes/${EncodedArn}/invocations?qualifier=DEFAULT"
@@ -877,7 +962,26 @@ Outputs:
 
   # MEMORY OUTPUTS
   MemoryId:
-    Description: "ID of the created memory"
-    Value: !GetAtt MCPServerMemory.MemoryId
+    Condition: CreateMemoryInCloudFormation
+    Description: "ID of the created memory (basic memory only)"
+    Value: !GetAtt MCPServerMemoryBasic.MemoryId
     Export:
       Name: !Sub "${AWS::StackName}-MemoryId"
+
+  MemoryType:
+    Description: "Type of memory configuration used"
+    Value: !If
+      - UseAdvancedMemory
+      - "Advanced (configured for long-term usage patterns)"
+      - "Basic (simple storage)"
+    Export:
+      Name: !Sub "${AWS::StackName}-MemoryType"
+
+  MemoryConfiguration:
+    Description: "Memory configuration details"
+    Value: !If
+      - UseAdvancedMemory
+      - !Sub "Advanced memory with ${MemoryEventExpiryDays} day retention, optimized for conversational AI"
+      - !Sub "Basic memory with ${MemoryEventExpiryDays} day retention, optimized for simple storage"
+    Export:
+      Name: !Sub "${AWS::StackName}-MemoryConfiguration"

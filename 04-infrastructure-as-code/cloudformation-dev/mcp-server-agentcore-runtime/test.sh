@@ -15,17 +15,35 @@ echo ""
 
 # Get stack outputs
 echo "📋 Retrieving stack configuration..."
-CLIENT_ID=$(aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" \
-  --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolClientId`].OutputValue' \
-  --output text \
-  --region "$REGION")
 
-AGENT_ARN=$(aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" \
-  --query 'Stacks[0].Outputs[?OutputKey==`MCPServerRuntimeArn`].OutputValue' \
-  --output text \
-  --region "$REGION")
+# Check if this is an advanced memory deployment (has runtime stack)
+if aws cloudformation describe-stacks --stack-name "$STACK_NAME-runtime" --region "$REGION" >/dev/null 2>&1; then
+    echo "🧠 Detected advanced memory deployment"
+    CLIENT_ID=$(aws cloudformation describe-stacks \
+      --stack-name "$STACK_NAME" \
+      --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolClientId`].OutputValue' \
+      --output text \
+      --region "$REGION")
+
+    AGENT_ARN=$(aws cloudformation describe-stacks \
+      --stack-name "$STACK_NAME-runtime" \
+      --query 'Stacks[0].Outputs[?OutputKey==`MCPServerRuntimeArn`].OutputValue' \
+      --output text \
+      --region "$REGION")
+else
+    echo "💾 Detected basic memory deployment"
+    CLIENT_ID=$(aws cloudformation describe-stacks \
+      --stack-name "$STACK_NAME" \
+      --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolClientId`].OutputValue' \
+      --output text \
+      --region "$REGION")
+
+    AGENT_ARN=$(aws cloudformation describe-stacks \
+      --stack-name "$STACK_NAME" \
+      --query 'Stacks[0].Outputs[?OutputKey==`MCPServerRuntimeArn`].OutputValue' \
+      --output text \
+      --region "$REGION")
+fi
 
 if [ -z "$CLIENT_ID" ] || [ -z "$AGENT_ARN" ]; then
   echo "❌ Error: Could not retrieve stack outputs"
@@ -34,6 +52,11 @@ if [ -z "$CLIENT_ID" ] || [ -z "$AGENT_ARN" ]; then
 fi
 
 echo "✓ Configuration retrieved"
+echo ""
+
+# Validate memory configuration
+echo "🔍 Validating memory configuration..."
+python validate_memory.py "$STACK_NAME" "$REGION"
 echo ""
 
 # Get authentication token
@@ -52,12 +75,17 @@ fi
 echo "✓ Authentication successful"
 echo ""
 
-# Test MCP server
-echo "🧪 Testing MCP server..."
+# Test MCP server tools
+echo "🧪 Testing MCP server tools..."
 echo ""
 python test_mcp_server.py "$AGENT_ARN" "$JWT_TOKEN" "$REGION"
 
 echo ""
+echo "🧠 Testing Memory functionality..."
+echo ""
+python test_memory.py "$AGENT_ARN" "$JWT_TOKEN" "$REGION" "$STACK_NAME"
+
+echo ""
 echo "=========================================="
-echo "✅ Testing Complete!"
+echo "✅ All Testing Complete!"
 echo "=========================================="

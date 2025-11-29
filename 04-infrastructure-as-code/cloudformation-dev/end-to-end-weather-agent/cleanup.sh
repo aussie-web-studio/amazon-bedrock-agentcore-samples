@@ -8,12 +8,14 @@ set -e
 # Configuration
 STACK_NAME="${1:-weather-agent-demo}"
 REGION="${2:-us-west-2}"
+S3_BUCKET="${STACK_NAME}-cf-templates"
 
 echo "=========================================="
 echo "Cleaning up Weather Agent Runtime"
 echo "=========================================="
 echo "Stack Name: $STACK_NAME"
 echo "Region: $REGION"
+echo "Template S3 Bucket: $S3_BUCKET"
 echo "=========================================="
 
 # Confirm deletion
@@ -47,6 +49,20 @@ if [ $? -eq 0 ]; then
         echo "=========================================="
         echo "✓ Stack deleted successfully!"
         echo "=========================================="
+        echo ""
+        
+        # Clean up S3 bucket
+        echo "Cleaning up S3 template bucket..."
+        if aws s3 ls "s3://${S3_BUCKET}" --region "$REGION" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "S3 bucket does not exist (already cleaned up)"
+        else
+            echo "Removing S3 bucket contents..."
+            aws s3 rm s3://"$S3_BUCKET" --recursive --region "$REGION" 2>/dev/null || true
+            echo "Deleting S3 bucket..."
+            aws s3 rb s3://"$S3_BUCKET" --region "$REGION" 2>/dev/null || true
+            echo "✓ S3 bucket cleaned up"
+        fi
+        
         echo ""
         echo "All resources have been cleaned up."
         echo ""

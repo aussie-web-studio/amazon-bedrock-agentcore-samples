@@ -26,5 +26,5 @@ In this tutorial you will learn how to use AgentCore Bedrock Code Interpreter to
 The code execution sandbox enables agents to safely process user queries by creating an isolated environment with a code interpreter, shell, and file system. After a Large Language Model helps with tool selection, code is executed within this session, before being returned to the user or agent for synthesis.
 
 <div style="text-align:left">
-    <img src="images/code_interpreter.png" width="100%"/>
+    <img src="./code-interpreter.png" width="100%"/>
 </div>
