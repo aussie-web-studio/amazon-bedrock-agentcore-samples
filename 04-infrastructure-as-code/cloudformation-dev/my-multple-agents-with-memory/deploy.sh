@@ -1,34 +1,34 @@
 #!/bin/bash
 
-# Deploy script for Weather Agent Runtime CloudFormation stack
-# This script deploys a complete weather agent with browser, code interpreter, and memory
+# Deploy script for Multi-Agent Runtime CloudFormation stack
+# This script deploys two agents with memory where agent1 orchestrates and calls agent2
 #
 # Usage: ./deploy.sh [STACK_NAME] [REGION] [MODEL_ID]
 #
 # Parameters:
-#   STACK_NAME - CloudFormation stack name (default: weather-agent-demo)
+#   STACK_NAME - CloudFormation stack name (default: multi-agent-demo)
 #   REGION     - AWS region (default: us-west-2)
 #   MODEL_ID   - Bedrock model ID (default: us.anthropic.claude-sonnet-4-5-20250929-v1:0)
 #
 # Examples:
 #   ./deploy.sh
-#   ./deploy.sh my-weather-agent us-east-1
-#   ./deploy.sh my-weather-agent us-east-1 anthropic.claude-3-5-sonnet-20241022-v2:0
+#   ./deploy.sh my-multi-agent us-east-1
+#   ./deploy.sh my-multi-agent us-east-1 anthropic.claude-3-5-sonnet-20241022-v2:0
 
 set -e
 
 # Configuration
-STACK_NAME="${1:-weather-agent-demo}"
+STACK_NAME="${1:-multi-agent-demo}"
 REGION="${2:-us-west-2}"
 MODEL_ID="${3:-amazon.nova-micro-v1:0}"
-TEMPLATE_FILE="end-to-end-weather-agent.yaml"
+TEMPLATE_FILE="infrastructure.yaml"
 
 # Get AWS Account ID for unique bucket naming
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 S3_BUCKET="${STACK_NAME}-cf-templates-${ACCOUNT_ID}"
 
 echo "=========================================="
-echo "Deploying Weather Agent Runtime"
+echo "Deploying Multi-Agent Runtime"
 echo "=========================================="
 echo "Stack Name: $STACK_NAME"
 echo "Region: $REGION"
@@ -133,8 +133,8 @@ if [ $DEPLOY_STATUS -eq 0 ]; then
     echo "✓ Stack $OPERATION initiated successfully!"
     echo ""
     echo "Waiting for stack $OPERATION to complete..."
-    echo "This will take approximately 15-20 minutes..."
-    echo "(Building Docker image, deploying agent with browser, code interpreter, and memory)"
+    echo "This will take approximately 20-25 minutes..."
+    echo "(Building Docker images for both agents, deploying with browser, code interpreter, and memory)"
     echo ""
     
     aws cloudformation wait "$WAIT_COMMAND" \
@@ -158,31 +158,59 @@ if [ $DEPLOY_STATUS -eq 0 ]; then
             --output table \
             --region "$REGION"
         echo ""
-        echo "Agent Runtime ID:"
+        echo "Agent1 (Orchestrator) Runtime ID:"
         aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
-            --query 'Stacks[0].Outputs[?OutputKey==`AgentRuntimeId`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent1RuntimeId`].OutputValue' \
             --output text \
             --region "$REGION"
         echo ""
-        echo "Browser ID:"
+        echo "Agent2 (Specialist) Runtime ID:"
+        aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent2RuntimeId`].OutputValue' \
+            --output text \
+            --region "$REGION"
+        echo ""
+        echo "Agent3 (Weather) Runtime ID:"
+        aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent3RuntimeId`].OutputValue' \
+            --output text \
+            --region "$REGION"
+        echo ""
+        echo "Browser ID (Shared):"
         aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`BrowserId`].OutputValue' \
             --output text \
             --region "$REGION"
         echo ""
-        echo "Code Interpreter ID:"
+        echo "Code Interpreter ID (Shared):"
         aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[?OutputKey==`CodeInterpreterId`].OutputValue' \
             --output text \
             --region "$REGION"
         echo ""
-        echo "Memory ID:"
+        echo "Agent1 Memory ID:"
         aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
-            --query 'Stacks[0].Outputs[?OutputKey==`MemoryId`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent1MemoryId`].OutputValue' \
+            --output text \
+            --region "$REGION"
+        echo ""
+        echo "Agent2 Memory ID:"
+        aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent2MemoryId`].OutputValue' \
+            --output text \
+            --region "$REGION"
+        echo ""
+        echo "Agent3 Memory ID:"
+        aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`Agent3MemoryId`].OutputValue' \
             --output text \
             --region "$REGION"
         echo ""
