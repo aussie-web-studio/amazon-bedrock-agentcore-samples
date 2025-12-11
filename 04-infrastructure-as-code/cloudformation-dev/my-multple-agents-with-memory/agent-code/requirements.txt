@@ -1,0 +1,10 @@
+strands-agents
+strands-agents-tools
+uv
+boto3>=1.40.0
+botocore>=1.40.0
+bedrock-agentcore
+bedrock-agentcore-starter-toolkit
+browser-use
+rich
+requests

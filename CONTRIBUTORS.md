@@ -6,6 +6,7 @@
 - aristsakpinis93
 - aurbac
 - bergjaak
+- chanbi
 - crupakheti
 - danystinson
 - dhawalkp
@@ -45,6 +46,7 @@
 - Evandro Franco
 - greg-aws
 - Frank Dallezotte
+- patcher9
 - Omar Elkharbotly
 - Chintan Patel
 - Shreyas Subramanian
@@ -52,3 +54,6 @@
 - sasikiran-malladi
 - sunkavar
 - joseanavarrom
+- spencer-zepelin
+- Chaitra Mathur (mchaitra007)
+- govindhi

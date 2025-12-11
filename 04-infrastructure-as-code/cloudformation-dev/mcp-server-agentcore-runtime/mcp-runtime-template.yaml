@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MCP Server Runtime - Deploy the runtime component after advanced memory is created"
+
+Parameters:
+  StackName:
+    Type: String
+    Description: "Name of the main stack"
+    
+  AgentName:
+    Type: String
+    Default: "MCPServerAgent"
+    Description: "Name for the MCP server runtime"
+    
+  ECRRepositoryUri:
+    Type: String
+    Description: "URI of the ECR repository"
+    
+  ImageTag:
+    Type: String
+    Default: "latest"
+    Description: "Tag for the Docker image"
+    
+  AgentExecutionRoleArn:
+    Type: String
+    Description: "ARN of the agent execution role"
+    
+  NetworkMode:
+    Type: String
+    Default: "PUBLIC"
+    Description: "Network mode for AgentCore resources"
+    
+  CognitoUserPoolClientId:
+    Type: String
+    Description: "Cognito User Pool Client ID"
+    
+  CognitoUserPoolId:
+    Type: String
+    Description: "Cognito User Pool ID"
+    
+  MemoryId:
+    Type: String
+    Description: "Memory ID (from basic memory or SSM parameter)"
+    
+  AdvancedMemoryEnabled:
+    Type: String
+    Default: "false"
+    Description: "Whether advanced memory is enabled"
+
+Resources:
+  MCPServerRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Properties:
+      AgentRuntimeName: !Sub
+        - "${StackNameUnderscore}_${AgentName}"
+        - StackNameUnderscore: !Join ["_", !Split ["-", !Ref StackName]]
+      AgentRuntimeArtifact:
+        ContainerConfiguration:
+          ContainerUri: !Sub "${ECRRepositoryUri}:${ImageTag}"
+      RoleArn: !Ref AgentExecutionRoleArn
+      NetworkConfiguration:
+        NetworkMode: !Ref NetworkMode
+      ProtocolConfiguration: MCP
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          AllowedClients:
+            - !Ref CognitoUserPoolClientId
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}/.well-known/openid-configuration"
+      Description: !Sub "MCP server runtime for ${StackName}"
+      EnvironmentVariables:
+        MEMORY_ID: !Ref MemoryId
+        AWS_REGION: !Sub "${AWS::Region}"
+        ADVANCED_MEMORY_ENABLED: !Ref AdvancedMemoryEnabled
+
+Outputs:
+  MCPServerRuntimeId:
+    Description: "ID of the created MCP server runtime"
+    Value: !GetAtt MCPServerRuntime.AgentRuntimeId
+    Export:
+      Name: !Sub "${StackName}-MCPServerRuntimeId"
+
+  MCPServerRuntimeArn:
+    Description: "ARN of the created MCP server runtime"
+    Value: !GetAtt MCPServerRuntime.AgentRuntimeArn
+    Export:
+      Name: !Sub "${StackName}-MCPServerRuntimeArn"
+
+  MCPServerInvocationURL:
+    Description: "URL to invoke the MCP server"
+    Value: !Sub
+      - "https://bedrock-agentcore.${AWS::Region}.amazonaws.com/runtimes/${EncodedArn}/invocations?qualifier=DEFAULT"
+      - EncodedArn: !Join
+          - ""
+          - - !Select [0, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%3A"
+            - !Select [1, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%3A"
+            - !Select [2, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%3A"
+            - !Select [3, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%3A"
+            - !Select [4, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%3A"
+            - !Select [5, !Split [":", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+            - "%2F"
+            - !Select [1, !Split ["/", !GetAtt MCPServerRuntime.AgentRuntimeArn]]
+    Export:
+      Name: !Sub "${StackName}-MCPServerInvocationURL"
